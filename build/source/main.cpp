@@ -105,7 +105,7 @@ int caf_main(actor_system& sys, const config& cfg) {
       cfg.server_mode ?
           self->spawn(actor_from_state<SummaServer>, settings, cfg.backup_server) :
           (cfg.gpu_mode ? self->spawn(actor_from_state<SummaGPUClient>, settings.distributed_settings_) :
-                     self->spawn(actor_from_state<SummaClient>, settings.distributed_settings_,cfg.restart));
+                     self->spawn(actor_from_state<SummaClient>, settings.distributed_settings_,settings,cfg.restart));
   }  else if (settings.distributed_settings_.distributed_mode_ &&
       settings.job_actor_settings_.data_assimilation_mode_) {
     
