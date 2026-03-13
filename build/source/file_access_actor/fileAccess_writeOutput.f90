@@ -117,6 +117,7 @@ subroutine writeOutput_fortran(handle_ncid, num_steps, start_gru, max_gru, &
   ! Change the C pointer to a fortran pointer
   call c_f_pointer(handle_ncid, ncid)
   call f_c_string_ptr(trim(message), message_r)
+  ! print*, 'write Output', num_steps, start_gru, max_gru
   
   ! Write the Parameters if first write
   if (write_parm_flag)then
@@ -548,6 +549,7 @@ subroutine writeScalar(ncid, outputTimestep, outputTimestepUpdate, nSteps, minGR
   integer(i4b)                      :: hru_counter=0
   integer(i4b)                      :: iStep=1                  ! counter for looping over nSteps
   integer(i4b)                      :: stepCounter=0            ! counter for the realVec
+  integer(i4b)                      :: maxStepCounter=0         ! counter for the realVec
   integer(i4b)                      :: iGRU,iHRU
   ! output array
   real(rkind)                       :: realVec(nHRUrun, nSteps)! real vector for all HRUs in the run domain
@@ -555,6 +557,7 @@ subroutine writeScalar(ncid, outputTimestep, outputTimestepUpdate, nSteps, minGR
 
   err=0; message="writeOutput.f90-writeScalar/"
   realVec = realMissing
+  maxStepCounter = 0
 
   select type(stat)
     class is (gru_hru_time_doubleVec)
@@ -581,28 +584,15 @@ subroutine writeScalar(ncid, outputTimestep, outputTimestepUpdate, nSteps, minGR
             realVec(hru_counter, stepCounter) = val
             outputTimeStepUpdate(iFreq) = stepCounter
           end do ! iStep
+          ! We need to output the farthest time step achieved within the batch
+          if (stepCounter .gt. maxStepCounter) maxStepCounter = stepCounter
         end do ! iHRU
       end do ! iGRU 
 
-      if (outputTimeStepUpdate(iFreq) /= stepCounter ) then
-        print*, "ERROR Missmatch in Steps - stat doubleVec"
-        print*, "   outputTimeStepUpdate(iFreq) = ", outputTimeStepUpdate(iFreq)
-        print*, "   outputTimestep(iFreq) = ", outputTimestep(iFreq)
-        print*, "   stepCounter = ", stepCounter
-        print*, "   iFreq = ", iFreq
-        print*, "   minGRU = ", minGRU
-        print*, "   maxGRU = ", maxGRU
-        print*, "   nSteps = ", nSteps
-        print*, "   gruCounter = ", gruCounter
-        print*, "   hru_counter = ", hru_counter
-        print*, "   iStep = ", iStep
-        err = 20
-        return
-      endif
       err = nf90_put_var(ncid%var(iFreq),meta(iVar)%ncVarID(iFreq),&
                          realVec(1:hru_counter, 1:stepCounter),    &
                          start=(/minGRU,outputTimestep(iFreq)/),   & 
-                         count=(/nHRUrun,stepCounter/))
+                         count=(/nHRUrun,maxStepCounter/))
       if(err/=0)then
         print*, trim(nf90_strerror(err))
         print *, "Variable: ", trim(meta(iVar)%varName)
@@ -1071,25 +1061,27 @@ do iVar = 1,nProgVars
 if (prog_meta(iVar)%varType==iLookvarType%unknown) cycle
 
 ! actual number of layers
-nSnow = 5! TEMP gru_struc(iGRU)%hruInfo(iHRU)%nSnow
+! nSnow = 5! TEMP gru_struc(iGRU)%hruInfo(iHRU)%nSnow
+nSnow = summa_struct(1)%indxStruct%gru(iGRU)%hru(iHRU)%var(iLookINDEX%nSnow)%tim(checkpoint)%dat(1)
 nSoil = gru_struc(iHRU)%hruInfo(1)%nSoil
 nLayers = nSoil + nSnow
+
 
 ! check size
 ! NOTE: this may take time that we do not wish to use
 okLength=.true.
 
-select case (prog_meta(iVar)%varType) ! should this be prog_meta?
-case(iLookVarType%scalarv);              okLength = (size(prog_data%gru(iGRU)%hru(iHRU)%var(iVar)%tim(checkpoint)%dat) == nScalar  )
-case(iLookVarType%wlength);              okLength = (size(prog_data%gru(iGRU)%hru(iHRU)%var(iVar)%tim(checkpoint)%dat) == nSpectral)
-case(iLookVarType%midSoil);              okLength = (size(prog_data%gru(iGRU)%hru(iHRU)%var(iVar)%tim(checkpoint)%dat) == nSoil    )
-case(iLookVarType%midToto);              okLength = (size(prog_data%gru(iGRU)%hru(iHRU)%var(iVar)%tim(checkpoint)%dat) == nLayers  )
-case(iLookVarType%ifcSoil);              okLength = (size(prog_data%gru(iGRU)%hru(iHRU)%var(iVar)%tim(checkpoint)%dat) == nSoil+1  )
-case(iLookVarType%ifcToto);              okLength = (size(prog_data%gru(iGRU)%hru(iHRU)%var(iVar)%tim(checkpoint)%dat) == nLayers+1)
-case(iLookVarType%midSnow); if (nSnow>0) okLength = (size(prog_data%gru(iGRU)%hru(iHRU)%var(iVar)%tim(checkpoint)%dat) == nSnow    )
-case(iLookVarType%ifcSnow); if (nSnow>0) okLength = (size(prog_data%gru(iGRU)%hru(iHRU)%var(iVar)%tim(checkpoint)%dat) == nSnow+1  )
-case default; err=20; message=trim(message)//'unknown var type'; return
-end select
+! select case (prog_meta(iVar)%varType) ! should this be prog_meta?
+! case(iLookVarType%scalarv);              okLength = (size(prog_data%gru(iGRU)%hru(iHRU)%var(iVar)%tim(checkpoint)%dat) == nScalar  )
+! case(iLookVarType%wlength);              okLength = (size(prog_data%gru(iGRU)%hru(iHRU)%var(iVar)%tim(checkpoint)%dat) == nSpectral)
+! case(iLookVarType%midSoil);              okLength = (size(prog_data%gru(iGRU)%hru(iHRU)%var(iVar)%tim(checkpoint)%dat) == nSoil    )
+! case(iLookVarType%midToto);              okLength = (size(prog_data%gru(iGRU)%hru(iHRU)%var(iVar)%tim(checkpoint)%dat) == nLayers  )
+! case(iLookVarType%ifcSoil);              okLength = (size(prog_data%gru(iGRU)%hru(iHRU)%var(iVar)%tim(checkpoint)%dat) == nSoil+1  )
+! case(iLookVarType%ifcToto);              okLength = (size(prog_data%gru(iGRU)%hru(iHRU)%var(iVar)%tim(checkpoint)%dat) == nLayers+1)
+! case(iLookVarType%midSnow); if (nSnow>0) okLength = (size(prog_data%gru(iGRU)%hru(iHRU)%var(iVar)%tim(checkpoint)%dat) == nSnow    )
+! case(iLookVarType%ifcSnow); if (nSnow>0) okLength = (size(prog_data%gru(iGRU)%hru(iHRU)%var(iVar)%tim(checkpoint)%dat) == nSnow+1  )
+! case default; err=20; message=trim(message)//'unknown var type'; return
+! end select
 
 ! error check
 if(.not.okLength)then
@@ -1099,18 +1091,20 @@ endif
 
 ! write data
 select case (prog_meta(iVar)%varType)
-case(iLookVarType%scalarv);           
+case(iLookVarType%scalarv);   
+  ! print*, prog_meta(iVar)%varName        
+  ! print*, iGRU, iHRU, checkpoint, prog_data%gru(iGRU)%hru(iHRU)%var(iVar)%tim(checkpoint)%dat
 err=nf90_put_var(ncid,ncVarID(iVar),(/prog_data%gru(iGRU)%hru(iHRU)%var(iVar)%tim(checkpoint)%dat/),start=(/cHRU,1/),count=(/1,nScalar  /))
 case(iLookVarType%wlength);              
 err=nf90_put_var(ncid,ncVarID(iVar),(/prog_data%gru(iGRU)%hru(iHRU)%var(iVar)%tim(checkpoint)%dat/),start=(/cHRU,1/),count=(/1,nSpectral/))
 case(iLookVarType%midSoil);              
 err=nf90_put_var(ncid,ncVarID(iVar),(/prog_data%gru(iGRU)%hru(iHRU)%var(iVar)%tim(checkpoint)%dat/),start=(/cHRU,1/),count=(/1,nSoil    /))
 case(iLookVarType%midToto);              
-err=nf90_put_var(ncid,ncVarID(iVar),(/prog_data%gru(iGRU)%hru(iHRU)%var(iVar)%tim(checkpoint)%dat/),start=(/cHRU,1/),count=(/1,nLayers - nSnow  /))
+err=nf90_put_var(ncid,ncVarID(iVar),(/prog_data%gru(iGRU)%hru(iHRU)%var(iVar)%tim(checkpoint)%dat/),start=(/cHRU,1/),count=(/1,nLayers  /))
 case(iLookVarType%ifcSoil);              
 err=nf90_put_var(ncid,ncVarID(iVar),(/prog_data%gru(iGRU)%hru(iHRU)%var(iVar)%tim(checkpoint)%dat/),start=(/cHRU,1/),count=(/1,nSoil+1  /))
 case(iLookVarType%ifcToto);              
-err=nf90_put_var(ncid,ncVarID(iVar),(/prog_data%gru(iGRU)%hru(iHRU)%var(iVar)%tim(checkpoint)%dat/),start=(/cHRU,1/),count=(/1,nLayers - nSnow +1/))
+err=nf90_put_var(ncid,ncVarID(iVar),(/prog_data%gru(iGRU)%hru(iHRU)%var(iVar)%tim(checkpoint)%dat/),start=(/cHRU,1/),count=(/1,nLayers +1/))
 case(iLookVarType%midSnow); 
 if (nSnow>0) err=nf90_put_var(ncid,ncVarID(iVar),(/prog_data%gru(iGRU)%hru(iHRU)%var(iVar)%tim(checkpoint)%dat/),start=(/cHRU,1/),count=(/1,nSnow    /))
 case(iLookVarType%ifcSnow); 
@@ -1129,8 +1123,9 @@ err=0; message='writeRestart/'
 end do ! iVar loop
 
 ! write index variables
-err=nf90_put_var(ncid,ncSnowID,(/gru_struc(iGRU)%hruInfo(iHRU)%nSnow/),start=(/cHRU/),count=(/1/))
+err=nf90_put_var(ncid,ncSnowID,(/summa_struct(1)%indxStruct%gru(iGRU)%hru(iHRU)%var(iLookINDEX%nSnow)%tim(checkpoint)%dat(1)/),start=(/cHRU/),count=(/1/))
 err=nf90_put_var(ncid,ncSoilID,(/gru_struc(iGRU)%hruInfo(iHRU)%nSoil/),start=(/cHRU/),count=(/1/))
+! print*, 'nSnow', iGRU, summa_struct(1)%indxStruct%gru(iGRU)%hru(iHRU)%var(iLookINDEX%nSnow)%tim(checkpoint)%dat(1)
 
 ! write selected basin variables
 err=nf90_put_var(ncid,ncVarID(nProgVars+1),(/bvar_data%gru(iGRU)%hru(iHRU)%var(iLookBVAR%routingRunoffFuture)%tim(checkpoint)%dat/),  start=(/iGRU/),count=(/1,nTimeDelay/))

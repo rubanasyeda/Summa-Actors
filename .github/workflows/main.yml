@@ -1,77 +1,45 @@
 name: Build test for SUMMA-Actors
 on:
-  #push:
-  #  branches: [ main ]
-  #pull_request:
-  #  branches: [ main ]
+  push:
+    branches: [ main ] # trigger workflow for any push to main 
+  schedule:
+    - cron: "35 14 * * 1,4" # Monday and Thursday at 14:35 UTC
   workflow_dispatch: # for manually triggered workflow
 
 jobs:
-  Check-Runner-Packages:
-    name: Check Runner Packages
+  Build-SUMMA-Actors:
+    name: Build SUMMA-Actors
     runs-on: ubuntu-latest
     defaults:
       run:
         shell: bash
-    steps:
-      - run: echo "Check Runner Packages"
-      - run: gfortran --version    # check for gfortran compiler
-      - run: g++ --version         # check for g++ compiler
-      - run: curl --version        # check for curl
-      - run: wget --version        # check for wget
-  Install-LAPACK:
-    name: Install LAPACK
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        shell: bash
-        working-directory: ./utils/dependencies
+        working-directory: ./
     steps:
       - uses: actions/checkout@v4  # checkout SUMMA-Actors repo
-      - run: echo "Install LAPACK"
-      #- run: ./install_lapack.sh   # install LAPACK -- successful
-  Install-NetCDF:
-    name: Install NetCDF
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        shell: bash
+      - name: Check Runner Packages
+        run: |
+          gfortran --version    # check for gfortran compiler
+          g++ --version         # check for g++ compiler
+          curl --version        # check for cURL
+          wget --version        # check for wget
+      - name: Install LAPACK
         working-directory: ./utils/dependencies
-    steps:
-      - uses: actions/checkout@v4  # checkout SUMMA-Actors repo
-      - run: echo "Install NetCDF"
-      - run: sudo apt install libcurl4-openssl-dev # install cURL development headers
-      - run: ./install_netcdf.sh   # install NetCDF -- successful
-  Install-CAF:
-    name: Install CAF
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        shell: bash
+        run: ./install_lapack.sh
+      - name: Install NetCDF
         working-directory: ./utils/dependencies
-    steps:
-      - uses: actions/checkout@v4  # checkout SUMMA-Actors repo
-      - run: echo "Install CAF"
-      #- run: ./install_caf.sh      # install CAF -- successful
-  Install-SUNDIALS:
-    name: Install SUNDIALS
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        shell: bash
+        run: |
+          sudo apt update
+          sudo apt install libcurl4-openssl-dev # install cURL development headers
+          ./install_netcdf.sh
+      - name: Install CAF
         working-directory: ./utils/dependencies
-    steps:
-      - uses: actions/checkout@v4  # checkout SUMMA-Actors repo
-      - run: echo "Install SUNDIALS"
-      #- run: ./install_sundials.sh # install SUNDIALS -- successful
-  Install-SUMMA:
-    name: Clone SUMMA
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        shell: bash
+        run: ./install_caf.sh
+      - name: Install SUNDIALS
+        working-directory: ./utils/dependencies
+        run: ./install_sundials.sh
+      - name: Clone SUMMA
         working-directory: ./build
-    steps:
-      - uses: actions/checkout@v4  # checkout SUMMA-Actors repo
-      - run: echo "Clone SUMMA"
-      - run: git clone -b develop_sundials https://github.com/CH-Earth/summa.git
+        run: git clone -b develop_sundials https://github.com/CH-Earth/summa.git
+      - name: Build SUMMA-Actors
+        working-directory: ./build/build_scripts
+        run: ./build.sh

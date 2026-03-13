@@ -114,7 +114,6 @@ subroutine runPhysics(indxGRU, indxHRU, modelTimeStep, hru_data, &
   integer(i4b)                              :: nSnow                  ! number of snow layers
   integer(i4b)                              :: nSoil                  ! number of soil layers
   integer(i4b)                              :: nLayers                ! total number of layers
-  real(dp), allocatable                     :: zSoilReverseSign(:)    ! height at bottom of each soil layer, negative downwards (m)
   ! ---------------------------------------------------------------------------------------
   hruId = gru_struc(indxGRU)%hruInfo(indxHRU)%hru_id
 
@@ -153,8 +152,6 @@ subroutine runPhysics(indxGRU, indxHRU, modelTimeStep, hru_data, &
       if(computeVegFluxFlag)      hru_data%computeVegFlux = yes
       if(.not.computeVegFluxFlag) hru_data%computeVegFlux = no
       
-      ! define the green vegetation fraction of the grid box (used to compute LAI)
-      hru_data%diagStruct%var(iLookDIAG%scalarGreenVegFraction)%dat(1) = greenVegFrac_monthly(hru_data%timeStruct%var(iLookTIME%im))
   end if  ! if the first time step
  
 
@@ -168,21 +165,18 @@ subroutine runPhysics(indxGRU, indxHRU, modelTimeStep, hru_data, &
   
   computeVegFluxFlag = (hru_data%ComputeVegFlux == yes)
 
+  ! initialize the number of flux calls
+  hru_data%diagStruct%var(iLookDIAG%numFluxCalls)%dat(1) = 0._dp
+
   !******************************************************************************
   !****************************** From run_oneHRU *******************************
   !******************************************************************************
   ! water pixel: do nothing
   if (hru_data%typeStruct%var(iLookTYPE%vegTypeIndex) == isWater) then
-      ! Set wall_clock time to zero so it does not get a random value
+    ! Set wall_clock time to zero so it does not get a random value
     hru_data%diagStruct%var(iLookDIAG%wallClockTime)%dat(1) = 0._dp 
     return
   endif
-
-  ! get height at bottom of each soil layer, negative downwards (used in Noah MP)
-  allocate(zSoilReverseSign(nSoil),stat=err)
-  if(err/=0)then; message=trim(message)//'problem allocating space for zSoilReverseSign'; return; endif
-
-  zSoilReverseSign(:) = -hru_data%progStruct%var(iLookPROG%iLayerHeight)%dat(nSnow+1:nLayers)
  
   ! populate parameters in Noah-MP modules
   ! Passing a maxSoilLayer in order to pass the check for NROOT, that is done to avoid making any changes to Noah-MP code.
@@ -190,13 +184,8 @@ subroutine runPhysics(indxGRU, indxHRU, modelTimeStep, hru_data, &
   call REDPRM(hru_data%typeStruct%var(iLookTYPE%vegTypeIndex),      & ! vegetation type index
               hru_data%typeStruct%var(iLookTYPE%soilTypeIndex),     & ! soil type
               hru_data%typeStruct%var(iLookTYPE%slopeTypeIndex),    & ! slope type index
-              zSoilReverseSign,                            & ! * not used: height at bottom of each layer [NOTE: negative] (m)
               maxSoilLayers,                               & ! number of soil layers
               urbanVegCategory)                              ! vegetation category for urban areas
-
-  ! deallocate height at bottom of each soil layer(used in Noah MP)
-  deallocate(zSoilReverseSign,stat=err)
-  if(err/=0)then;message=trim(message)//'problem deallocating space for zSoilReverseSign'; return; endif
  
 
   ! overwrite the minimum resistance
@@ -224,9 +213,6 @@ subroutine runPhysics(indxGRU, indxHRU, modelTimeStep, hru_data, &
         hru_data%tmZoneOffsetFracDay,         & ! time zone offset in fractional days
         err,cmessage)                  ! error control
   if(err/=0)then;err=20; message=trim(message)//cmessage; return; endif
- 
-  ! initialize the number of flux calls
-  hru_data%diagStruct%var(iLookDIAG%numFluxCalls)%dat(1) = 0._dp
 
   ! run the model for a single HRU
   call coupled_em(&
@@ -371,22 +357,6 @@ end subroutine runPhysics
     hru_data%mparStruct%var(iLookPARAM%absTolAquifr)%dat(1) = atol_aquifr
   
     ! If the global default tolerance flag is set, then override the specific tolerances 
-    if (f_get_default_tol()) then
-      rtol_temp_cas = rtol
-      rtol_temp_veg = rtol
-      rtol_wat_veg = rtol
-      rtol_temp_soil_snow = rtol
-      rtol_wat_snow = rtol
-      rtol_matric = rtol
-      rtol_aquifr = rtol
-      atol_temp_cas = atol
-      atol_temp_veg = atol
-      atol_wat_veg = atol
-      atol_temp_soil_snow = atol
-      atol_wat_snow = atol
-      atol_matric = atol
-      atol_aquifr = atol
-    endif
   end subroutine set_sundials_tolerances
 
 ! ! *******************************************************************************************

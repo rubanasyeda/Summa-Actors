@@ -48,6 +48,7 @@ class config : public actor_system_config {
     bool backup_server = false;
     bool server_mode = false;
     bool help = false;
+    std::string restart = "never";
     bool gpu_mode = false;
         
     
@@ -62,6 +63,7 @@ class config : public actor_system_config {
         .add(backup_server, "backup-server,b", "flag to denote if the server starting is a backup server")
         .add(server_mode,   "server-mode", "enable server mode")
         .add(host,          "host", "Hostname of the server")
+        .add(restart,       "restart,r", "Restart frequency")
         .add(gpu_mode, "gpu", "Run with gpu client")
         .add(help,          "help,h", "Print this help message");
     }
@@ -103,7 +105,7 @@ int caf_main(actor_system& sys, const config& cfg) {
       cfg.server_mode ?
           self->spawn(actor_from_state<SummaServer>, settings, cfg.backup_server) :
           (cfg.gpu_mode ? self->spawn(actor_from_state<SummaGPUClient>, settings.distributed_settings_) :
-                     self->spawn(actor_from_state<SummaClient>, settings.distributed_settings_));
+                     self->spawn(actor_from_state<SummaClient>, settings.distributed_settings_,cfg.restart));
   }  else if (settings.distributed_settings_.distributed_mode_ &&
       settings.job_actor_settings_.data_assimilation_mode_) {
     
@@ -114,7 +116,7 @@ int caf_main(actor_system& sys, const config& cfg) {
 
   } else {
     self->spawn(actor_from_state<SummaActor>, cfg.startGRU, cfg.countGRU, 
-                settings, self);
+                settings, self, cfg.restart);
   }
   return EXIT_SUCCESS;
   }
