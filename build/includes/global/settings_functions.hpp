@@ -175,6 +175,83 @@ class JobActorSettings {
     }
 };
 
+// ---- Batch Settings ----
+enum class BatchMode {
+  FIXED,
+  ADAPTIVE_CPU,
+  ADAPTIVE_CPU_MEM
+};
+
+class BatchSettings {
+  public:
+    BatchMode mode_;
+
+    int fixed_batch_size_;   // used when mode_ == FIXED
+
+    int alpha_;              // single-node scaling factor
+    int beta_;               // distributed scaling factor
+
+    int min_batch_;
+    int max_batch_;
+
+    int min_batch_dist_;
+    int max_batch_dist_;
+
+    bool enable_memory_cap_;
+
+    BatchSettings(
+      BatchMode mode = BatchMode::FIXED,
+      int fixed_batch_size = MISSING_INT,
+      int alpha = 4,
+      int beta = 16,
+      int min_batch = 1,
+      int max_batch = 2000,
+      int min_batch_dist = 1,
+      int max_batch_dist = 8000,
+      bool enable_memory_cap = true
+    )
+      : mode_(mode),
+        fixed_batch_size_(fixed_batch_size),
+        alpha_(alpha),
+        beta_(beta),
+        min_batch_(min_batch),
+        max_batch_(max_batch),
+        min_batch_dist_(min_batch_dist),
+        max_batch_dist_(max_batch_dist),
+        enable_memory_cap_(enable_memory_cap) {}
+
+    ~BatchSettings() {}
+
+    std::string toString() {
+      std::string str = "Batch Settings:\n";
+      str += "Mode: " + std::to_string(static_cast<int>(mode_)) + "\n";
+      str += "Fixed Batch Size: " + std::to_string(fixed_batch_size_) + "\n";
+      str += "Alpha: " + std::to_string(alpha_) + "\n";
+      str += "Beta: " + std::to_string(beta_) + "\n";
+      str += "Min Batch: " + std::to_string(min_batch_) + "\n";
+      str += "Max Batch: " + std::to_string(max_batch_) + "\n";
+      str += "Min Batch Dist: " + std::to_string(min_batch_dist_) + "\n";
+      str += "Max Batch Dist: " + std::to_string(max_batch_dist_) + "\n";
+      str += "Enable Memory Cap: " + std::to_string(enable_memory_cap_) + "\n";
+      return str;
+    }
+
+    template<class Inspector>
+    friend bool inspect(Inspector& insp, BatchSettings& settings) {
+      return insp.object(settings).fields(
+        insp.field("mode", settings.mode_),
+        insp.field("fixed_batch_size", settings.fixed_batch_size_),
+        insp.field("alpha", settings.alpha_),
+        insp.field("beta", settings.beta_),
+        insp.field("min_batch", settings.min_batch_),
+        insp.field("max_batch", settings.max_batch_),
+        insp.field("min_batch_dist", settings.min_batch_dist_),
+        insp.field("max_batch_dist", settings.max_batch_dist_),
+        insp.field("enable_memory_cap", settings.enable_memory_cap_)
+      );
+    }
+};
+
 class HRUActorSettings {
   public:
     bool print_output_;
@@ -217,11 +294,15 @@ class Settings {
     JobActorSettings job_actor_settings_;
     HRUActorSettings hru_actor_settings_;
 
+    BatchSettings batch_settings_;
+    bool batching_settings_present_ = false;
+
     Settings(std::string json_file = "") : json_file_(json_file) {};
     ~Settings() {};
     int readSettings();
     void generateConfigFile();
     void printSettings();
+    int getEffectiveBatchSize(int total_units) const;
 
     template<typename T>
     std::optional<T> getSettings(json settings, std::string key_1, 
@@ -256,6 +337,7 @@ class Settings {
              insp.field("fa_actor_settings", settings.fa_actor_settings_),
              insp.field("job_actor_settings", settings.job_actor_settings_),
              insp.field("hru_actor_settings", settings.hru_actor_settings_),
+             insp.field("batch_settings", settings.batch_settings_),
              insp.field("json_file", settings.json_file_));
     }
 }; 

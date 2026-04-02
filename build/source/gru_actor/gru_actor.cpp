@@ -1,6 +1,5 @@
 #include "gru_actor.hpp"
 
-
 using namespace caf;
 
 behavior GruActor::make_behavior() {  

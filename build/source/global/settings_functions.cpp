@@ -1,6 +1,31 @@
 #include "settings_functions.hpp"
+#include <sys/sysinfo.h>
+
 extern "C" { 
   void f_set_default_tol(bool new_tol);
+}
+
+static int getTotalRamGB() {
+  struct sysinfo info;
+  if (sysinfo(&info) != 0) return 0; // unknown
+  unsigned long long bytes =
+      static_cast<unsigned long long>(info.totalram) * info.mem_unit;
+  unsigned long long gb = bytes / (1024ULL * 1024ULL * 1024ULL);
+  return static_cast<int>(gb);
+}
+
+static int memoryCapFromRamGB(int ram_gb) {
+  if (ram_gb <= 0) return 200;          // conservative fallback
+  if (ram_gb <= 16) return 200;
+  if (ram_gb <= 64) return 500;
+  if (ram_gb <= 256) return 1000;
+  return 2000;
+}
+
+static BatchMode parseBatchMode(const std::string& s) {
+  if (s == "adaptive_cpu") return BatchMode::ADAPTIVE_CPU;
+  if (s == "adaptive_cpu_mem") return BatchMode::ADAPTIVE_CPU_MEM;
+  return BatchMode::FIXED;
 }
 
 int Settings::readSettings() {
@@ -56,12 +81,45 @@ int Settings::readSettings() {
         .value_or(MISSING_INT)
   );
 
+  batch_settings_present_ = (json_settings.find("Batching") != json_settings.end());
+  if(batch_settings_present_) {
+    batch_settings_ = BatchSettings(
+        parseBatchMode(getSettings<std::string>(json_settings, "Batching", "mode")
+            .value_or("fixed")),
+        getSettings<int>(json_settings, "Batching", "fixed_batch_size")
+            .value_or(MISSING_INT),
+        getSettings<double>(json_settings, "Batching", "alpha")
+            .value_or(4),
+        getSettings<double>(json_settings, "Batching", "beta")
+            .value_or(16),
+        getSettings<int>(json_settings, "Batching", "min_batch")
+            .value_or(1),
+        getSettings<int>(json_settings, "Batching", "max_batch")
+            .value_or(2000),
+        getSettings<int>(json_settings, "Batching", "min_batch_dist")
+            .value_or(1),
+        getSettings<int>(json_settings, "Batching", "max_batch_dist")
+            .value_or(8000),
+        getSettings<bool>(json_settings, "Batching", "enable_memory_cap")
+            .value_or(true)
+    );
+  }
+  
+
   hru_actor_settings_ = HRUActorSettings(
     getSettings<bool>(json_settings, "HRU_Actor", "print_output")
         .value_or(true),
     getSettings<int>(json_settings, "HRU_Actor", "output_frequency")
         .value_or(OUTPUT_FREQUENCY));
 
+  bool batching_present = false;
+  try {
+    if (json_settings.find("Batching") != json_settings.end()) {
+      batching_present = true;
+    }
+  } catch (json::exception& e) {
+    batching_present = false;
+  }
   return SUCCESS;
 }
 
@@ -106,6 +164,8 @@ void Settings::printSettings() {
             << fa_actor_settings_.toString() << "\n"
             << "************ JOB_ACTOR SETTINGS ************\n"
             << job_actor_settings_.toString() << "\n"
+            << "************ BATCHING SETTINGS ************\n"
+            << batch_settings_.toString() << "\n"
             << "************ HRU_ACTOR SETTINGS ************\n"
             << hru_actor_settings_.toString() << "\n"
             << "********************************************\n\n";
@@ -154,4 +214,85 @@ void Settings::generateConfigFile() {
     std::ofstream config_file_stream("config.json");
     config_file_stream << std::setw(4) << config_file.dump(2) << std::endl;
     config_file_stream.close();
+}
+
+// This function determines the effective batch size based on the settings and total work units
+int Settings::getEffectiveBatchSize(int total_units) const {
+  // Defensive
+  if (total_units <= 0) return 1;
+
+  // If Batching exists in config, it overrides BOTH legacy fields
+  if (batch_settings_present_) {
+    const bool dist = distributed_settings_.distributed_mode_;
+
+    // detect cores
+    unsigned cores = std::thread::hardware_concurrency();
+    if (cores == 0) cores = 1;
+
+    int chosen = 1;
+
+    // -----------------------
+    // FIXED mode
+    // -----------------------
+    if (batch_settings_.mode_ == BatchMode::FIXED) {
+      chosen = batch_settings_.fixed_batch_size_;
+
+      // If fixed_batch_size missing/invalid, fall back safely
+      if (chosen <= 0 || chosen == MISSING_INT) {
+        chosen = static_cast<int>(cores); // very safe fallback
+      }
+    }
+    // -----------------------
+    // ADAPTIVE (Approach 1 or 2)
+    // -----------------------
+    else {
+      // Approach 1 baseline: batch_cpu = α*cores (single) or β*cores (dist)
+      int scale = dist ? batch_settings_.beta_ : batch_settings_.alpha_;
+      long long batch_cpu = static_cast<long long>(scale) * static_cast<long long>(cores);
+
+      // Apply bounds (different bounds for dist vs single)
+      if (dist) {
+        if (batch_cpu < batch_settings_.min_batch_dist_) batch_cpu = batch_settings_.min_batch_dist_;
+        if (batch_cpu > batch_settings_.max_batch_dist_) batch_cpu = batch_settings_.max_batch_dist_;
+      } else {
+        if (batch_cpu < batch_settings_.min_batch_) batch_cpu = batch_settings_.min_batch_;
+        if (batch_cpu > batch_settings_.max_batch_) batch_cpu = batch_settings_.max_batch_;
+      }
+
+      chosen = static_cast<int>(batch_cpu);
+
+      // -----------------------
+      // Approach 2: Memory-capped heuristic
+      // Only apply if mode is ADAPTIVE_CPU_MEM (and memory cap enabled)
+      // batch = min(total_units, batch_cpu, batch_mem)
+      // -----------------------
+      if (batch_settings_.mode_ == BatchMode::ADAPTIVE_CPU_MEM &&
+          batch_settings_.enable_memory_cap_) {
+        int ram_gb = getTotalRamGB();
+        int batch_mem = memoryCapFromRamGB(ram_gb);
+        chosen = std::min(chosen, batch_mem);
+      }
+    }
+
+    // Always cap by workload
+    chosen = std::min(chosen, total_units);
+
+    // Final safety clamp
+    if (chosen < 1) chosen = 1;
+
+    return chosen;
+  }
+
+  // -----------------------
+  // Legacy behavior if "Batching" is not present
+  // -----------------------
+  if (distributed_settings_.distributed_mode_) {
+    int legacy = distributed_settings_.num_hru_per_batch_;
+    if (legacy <= 0) legacy = 1;
+    return std::min(legacy, total_units);
+  }
+
+  int legacy = job_actor_settings_.batch_size_;
+  if (legacy <= 0 || legacy == MISSING_INT) legacy = 1;
+  return std::min(legacy, total_units);
 }
