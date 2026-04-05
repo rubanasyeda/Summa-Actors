@@ -1,4 +1,5 @@
 #include "job_actor.hpp"
+#include "settings_functions.hpp"
 
 using json = nlohmann::json;
 using chrono_time = std::chrono::time_point<std::chrono::high_resolution_clock>;
@@ -400,6 +401,9 @@ void JobActor::spawnGruBatches() {
     batch_size = std::ceil(static_cast<double>(gru_struc_->getNumGru()) / 
         static_cast<double>(std::thread::hardware_concurrency()));
   } else {
+    int total_units = gru_struc_->getNumGru();
+    settings_.applyEffectiveBatchSize(total_units); 
+    std::cout << "Effective Batch Size after applying settings: " << job_actor_settings_.batch_size_ << "\n";
     // Use the user selected batch size
     batch_size = job_actor_settings_.batch_size_;
   }

@@ -22,10 +22,10 @@ static int memoryCapFromRamGB(int ram_gb) {
   return 2000;
 }
 
-static BatchMode parseBatchMode(const std::string& s) {
-  if (s == "adaptive_cpu") return BatchMode::ADAPTIVE_CPU;
-  if (s == "adaptive_cpu_mem") return BatchMode::ADAPTIVE_CPU_MEM;
-  return BatchMode::FIXED;
+static int parseBatchMode(const std::string& s) {
+  if (s == "adaptive_cpu") return BATCH_ADAPTIVE_CPU;
+  if (s == "adaptive_cpu_mem") return BATCH_ADAPTIVE_CPU_MEM;
+  return BATCH_FIXED;
 }
 
 int Settings::readSettings() {
@@ -81,8 +81,8 @@ int Settings::readSettings() {
         .value_or(MISSING_INT)
   );
 
-  batch_settings_present_ = (json_settings.find("Batching") != json_settings.end());
-  if(batch_settings_present_) {
+  batching_settings_present_ = (json_settings.find("Batching") != json_settings.end());
+  if(batching_settings_present_) {
     batch_settings_ = BatchSettings(
         parseBatchMode(getSettings<std::string>(json_settings, "Batching", "mode")
             .value_or("fixed")),
@@ -112,14 +112,7 @@ int Settings::readSettings() {
     getSettings<int>(json_settings, "HRU_Actor", "output_frequency")
         .value_or(OUTPUT_FREQUENCY));
 
-  bool batching_present = false;
-  try {
-    if (json_settings.find("Batching") != json_settings.end()) {
-      batching_present = true;
-    }
-  } catch (json::exception& e) {
-    batching_present = false;
-  }
+
   return SUCCESS;
 }
 
@@ -156,7 +149,10 @@ std::optional<std::vector<std::string>> Settings::getSettingsArray(
 
 
 void Settings::printSettings() {
-  std::cout << "************ DISTRIBUTED_SETTINGS ************\n"
+  std::cout << "************ BATCHING SETTINGS **************\n"
+            << "Batching settings present: " << batching_settings_present_ << "\n"
+            << batch_settings_.toString() << "\n"
+            << "************ DISTRIBUTED_SETTINGS ************\n"
             << distributed_settings_.toString() << "\n"
             << "************ SUMMA_ACTORS SETTINGS ************\n"
             << summa_actor_settings_.toString() << "\n"
@@ -164,8 +160,6 @@ void Settings::printSettings() {
             << fa_actor_settings_.toString() << "\n"
             << "************ JOB_ACTOR SETTINGS ************\n"
             << job_actor_settings_.toString() << "\n"
-            << "************ BATCHING SETTINGS ************\n"
-            << batch_settings_.toString() << "\n"
             << "************ HRU_ACTOR SETTINGS ************\n"
             << hru_actor_settings_.toString() << "\n"
             << "********************************************\n\n";
@@ -222,7 +216,7 @@ int Settings::getEffectiveBatchSize(int total_units) const {
   if (total_units <= 0) return 1;
 
   // If Batching exists in config, it overrides BOTH legacy fields
-  if (batch_settings_present_) {
+  if (batching_settings_present_) {
     const bool dist = distributed_settings_.distributed_mode_;
 
     // detect cores
@@ -234,7 +228,7 @@ int Settings::getEffectiveBatchSize(int total_units) const {
     // -----------------------
     // FIXED mode
     // -----------------------
-    if (batch_settings_.mode_ == BatchMode::FIXED) {
+    if (batch_settings_.mode_ == BATCH_FIXED) {
       chosen = batch_settings_.fixed_batch_size_;
 
       // If fixed_batch_size missing/invalid, fall back safely
@@ -266,7 +260,7 @@ int Settings::getEffectiveBatchSize(int total_units) const {
       // Only apply if mode is ADAPTIVE_CPU_MEM (and memory cap enabled)
       // batch = min(total_units, batch_cpu, batch_mem)
       // -----------------------
-      if (batch_settings_.mode_ == BatchMode::ADAPTIVE_CPU_MEM &&
+      if (batch_settings_.mode_ == BATCH_ADAPTIVE_CPU_MEM &&
           batch_settings_.enable_memory_cap_) {
         int ram_gb = getTotalRamGB();
         int batch_mem = memoryCapFromRamGB(ram_gb);
@@ -295,4 +289,18 @@ int Settings::getEffectiveBatchSize(int total_units) const {
   int legacy = job_actor_settings_.batch_size_;
   if (legacy <= 0 || legacy == MISSING_INT) legacy = 1;
   return std::min(legacy, total_units);
+}
+
+void Settings::applyEffectiveBatchSize(int total_units) {
+  int eff = getEffectiveBatchSize(total_units);
+
+  // Make it affect BOTH code paths, regardless of which field they read
+  job_actor_settings_.batch_size_ = eff;
+  distributed_settings_.num_hru_per_batch_ = eff;
+
+  std::cout << "[Batching] effective_batch_size=" << eff
+            << " total_units=" << total_units
+            << " distributed_mode=" << distributed_settings_.distributed_mode_
+            << " cores=" << std::thread::hardware_concurrency()
+            << "\n";
 }

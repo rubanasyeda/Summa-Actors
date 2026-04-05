@@ -45,6 +45,7 @@ class JobActor {
   NumGRUInfo num_gru_info_;
 
   // Settings
+  Settings settings_;
   JobActorSettings job_actor_settings_;
   FileAccessActorSettings fa_actor_settings_;
   HRUActorSettings hru_actor_settings_;
@@ -73,9 +74,11 @@ class JobActor {
   
   public:
     JobActor(caf::event_based_actor* self, Batch batch, bool enable_logging,
+             Settings settings,  
              JobActorSettings job_settings, FileAccessActorSettings fa_settings,
              HRUActorSettings hru_settings, caf::actor parent, std::string restart) 
              : self_(self), batch_(batch), enable_logging_(enable_logging),
+               settings_(std::move(settings)),
                job_actor_settings_(job_settings), 
                fa_actor_settings_(fa_settings), 
                hru_actor_settings_(hru_settings), parent_(parent), restart_(restart),
@@ -168,6 +171,7 @@ struct distributed_job_state {
   NumGRUInfo num_gru_info;
   std::vector<NumGRUInfo> node_num_gru_info;
   
+  Settings settings_;  
   DistributedSettings distributed_settings;
   JobActorSettings job_actor_settings; 
   HRUActorSettings hru_actor_settings;

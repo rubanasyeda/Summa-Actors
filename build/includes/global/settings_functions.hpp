@@ -18,6 +18,8 @@
 
 using json = nlohmann::json;
 
+static int getTotalRamGB();
+
 class DistributedSettings {
   public:
     bool distributed_mode_;                    
@@ -176,15 +178,14 @@ class JobActorSettings {
 };
 
 // ---- Batch Settings ----
-enum class BatchMode {
-  FIXED,
-  ADAPTIVE_CPU,
-  ADAPTIVE_CPU_MEM
-};
+// BatchMode values
+static constexpr int BATCH_FIXED = 0;
+static constexpr int BATCH_ADAPTIVE_CPU = 1;
+static constexpr int BATCH_ADAPTIVE_CPU_MEM = 2;
 
 class BatchSettings {
   public:
-    BatchMode mode_;
+    int mode_;
 
     int fixed_batch_size_;   // used when mode_ == FIXED
 
@@ -200,7 +201,7 @@ class BatchSettings {
     bool enable_memory_cap_;
 
     BatchSettings(
-      BatchMode mode = BatchMode::FIXED,
+      int mode = BATCH_FIXED,
       int fixed_batch_size = MISSING_INT,
       int alpha = 4,
       int beta = 16,
@@ -224,7 +225,7 @@ class BatchSettings {
 
     std::string toString() {
       std::string str = "Batch Settings:\n";
-      str += "Mode: " + std::to_string(static_cast<int>(mode_)) + "\n";
+      str += "Mode: " + std::to_string(mode_) + "\n";
       str += "Fixed Batch Size: " + std::to_string(fixed_batch_size_) + "\n";
       str += "Alpha: " + std::to_string(alpha_) + "\n";
       str += "Beta: " + std::to_string(beta_) + "\n";
@@ -303,6 +304,7 @@ class Settings {
     void generateConfigFile();
     void printSettings();
     int getEffectiveBatchSize(int total_units) const;
+    void applyEffectiveBatchSize(int total_units);
 
     template<typename T>
     std::optional<T> getSettings(json settings, std::string key_1, 

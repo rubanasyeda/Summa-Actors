@@ -17,6 +17,9 @@ behavior SummaServer::summa_server() {
   
 
   client_container_ = Client_Container();
+
+  int total_units = settings_.distributed_settings_.total_hru_count_;
+  settings_.applyEffectiveBatchSize(total_units);
   // TODO: Batch Container should have start gru passed to it
   batch_container_ = BatchContainer(
           1,

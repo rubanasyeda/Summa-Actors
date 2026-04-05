@@ -14,9 +14,20 @@
 #include <errno.h>
 #include <cstring>
 #include <iostream>
+#include <sys/sysinfo.h>
+
 
 using json = nlohmann::json;
 using namespace caf;
+
+static int getTotalRamGB() {
+  struct sysinfo info;
+  if (sysinfo(&info) != 0) return 0; // unknown
+  unsigned long long bytes =
+      static_cast<unsigned long long>(info.totalram) * info.mem_unit;
+  unsigned long long gb = bytes / (1024ULL * 1024ULL * 1024ULL);
+  return static_cast<int>(gb);
+}
 
 behavior SummaActor::make_behavior() {
   self_->println("Starting SUMMA Actor, start_gru {}, num_gru {}", start_gru_, 
@@ -59,8 +70,19 @@ behavior SummaActor::make_behavior() {
     return {};
   }
 
+  int total_units = num_gru_;
+  int effective_batch = settings_.getEffectiveBatchSize(total_units);
+
+  // Print chosen batch size (CAF logger style)
+  self_->println("[Batching] effective_batch_size={} total_units={} distributed={} cores={} RAM(GB)={}",
+                effective_batch, total_units,
+                settings_.distributed_settings_.distributed_mode_,
+                std::thread::hardware_concurrency(),
+                getTotalRamGB()); // Approximate RAM in GB
+
   batch_container_ = std::make_unique<BatchContainer>(start_gru_, num_gru_, 
-      settings_.summa_actor_settings_.max_gru_per_job_, log_folder_);
+      effective_batch, log_folder_);
+
   self_->println("\n\nStarting SUMMA With {} Batches\n\n", 
                  batch_container_->getBatchesRemaining());
 
@@ -124,6 +146,7 @@ int SummaActor::spawnJob() {
   current_batch_ = std::make_shared<Batch>(batch.value());
   current_job_ = self_->spawn(actor_from_state<JobActor>, batch.value(),
                               settings_.summa_actor_settings_.enable_logging_,
+                              settings_,
                               settings_.job_actor_settings_, 
                               settings_.fa_actor_settings_,
                               settings_.hru_actor_settings_, self_, restart_);

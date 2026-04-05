@@ -198,6 +198,8 @@ void DAClientActor::spawnGruBatches() {
     batch_size = std::ceil(static_cast<double>(gru_struc_->getNumGru()) / 
         static_cast<double>(std::thread::hardware_concurrency()));
   } else {
+    int total_units = gru_struc_->getNumGru();
+    settings_.applyEffectiveBatchSize(total_units); 
     // Use the user selected batch size
     batch_size = settings_.job_actor_settings_.batch_size_;
   }
